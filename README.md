@@ -2,14 +2,6 @@
 
 This Python-based TikTok Bot automates various interactions on [Zefoy](https://zefoy.com/), such as increasing followers, hearts, views, shares, and more, using [Selenium](https://www.selenium.dev/) to navigate and interact with the website. The script is designed for educational purposes to demonstrate automation and web scraping techniques.
 
-## Sponsors
-
-### Thordata
-
-Reliable and affordable residential proxies. Helping you collect global data with one click. [Sign up](https://dashboard.thordata.com/register?invitation_code=18MXCIA6) for free to get 1GB of  residential proxies and 2,000 SERP APIs.
-
-[<img src="https://github.com/user-attachments/assets/c9d7e1a2-079c-4617-8aca-300a2324656a" />](https://dashboard.thordata.com/register?invitation_code=18MXCIA6)
-
 ## Prerequisites
 
 - [Python 3.x](https://www.python.org/downloads/)
