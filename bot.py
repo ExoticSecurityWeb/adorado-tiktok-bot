@@ -1,134 +1,138 @@
 import os
-import sys
-import time
-import threading
-from time import time as current_time, strftime, gmtime, sleep
-import pyfiglet
+import requests
+import discord
+from discord import app_commands
+from discord.ext import commands
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+# 1. Chargement sécurisé des clés d'API depuis l'environnement
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+ZEFAME_API_KEY = os.getenv("ZEFAME_API_KEY")
+HIKER_API_KEY = os.getenv("HIKER_API_KEY")
 
-# Configuration des métriques
-metrics = {
-    "views": 0,
-    "hearts": 0,
-    "followers": 0,
-    "shares": 0
-}
-start_time = 0
+ZEFAME_URL = "https://zefame.com/api/v2"
+HIKER_URL = "https://api.hikerapi.com/v2"
 
-def clear_console():
-    os.system('cls' if os.name == 'nt' else 'clear')
+# 2. Initialisation du Bot Discord
+class ZefameHikerBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        super().__init__(command_prefix="!", intents=intents)
 
-def set_terminal_title(title_text):
-    if os.name == 'nt':
-        os.system(f'title {title_text}')
+    async def setup_hook(self):
+        # Synchronisation automatique des commandes slash avec Discord
+        await self.tree.sync()
+        print("[INFO] Commandes slash synchronisées avec succès.")
 
-def beautify(arg):
-    return format(arg, ',d').replace(',', '.')
+bot = ZefameHikerBot()
 
-def update_title_thread(mode_name, metric_key):
-    """Met à jour le titre du terminal en arrière-plan."""
-    while True:
-        elapsed = strftime('%H:%M:%S', gmtime(current_time() - start_time))
-        count = beautify(metrics[metric_key])
-        set_terminal_title(f"TikTok Bot | {mode_name}: {count} | Temps écoulé: {elapsed}")
-        sleep(1)
+@bot.event
+async def on_ready():
+    print(f"[INFO] Bot connecté en tant que {bot.user.name} (ID: {bot.user.id})")
 
-def run_automation_loop(driver, vid_url, btn_service_xpath, input_xpath, search_xpath, send_xpath, cooldown, metric_key, increment_val):
-    """Boucle d'automatisation générique pour traiter les 4 modes d'engagement."""
-    wait = WebDriverWait(driver, 15)
-    
-    # 1. Attente de la résolution manuelle du CAPTCHA initial
-    while True:
-        try:
-            service_btn = wait.until(EC.element_to_be_clickable((By.XPATH, btn_service_xpath)))
-            service_btn.click()
-            print("[+] Service sélectionné.")
-            break
-        except Exception:
-            print("[-] Résolvez le CAPTCHA dans le navigateur Chrome...")
-            sleep(5)
-            driver.refresh()
+# ==========================================
+# COMMANDES ZEFAME (SMM & SERVICES GRATUITS)
+# ==========================================
 
-    # 2. Boucle d'envoi répétitive
-    while True:
-        try:
-            sleep(2)
-            input_elem = wait.until(EC.presence_of_element_located((By.XPATH, input_xpath)))
-            input_elem.clear()
-            input_elem.send_keys(vid_url)
-
-            sleep(1)
-            search_btn = wait.until(EC.element_to_be_clickable((By.XPATH, search_xpath)))
-            search_btn.click()
-
-            sleep(5)
-            send_btn = wait.until(EC.element_to_be_clickable((By.XPATH, send_xpath)))
-            send_btn.click()
-
-            metrics[metric_key] += increment_val
-            print(f"[+] Succès ! {metric_key.capitalize()} envoyés.")
-
-            driver.refresh()
-            print(f"[*] Pause obligatoire de {cooldown}s (limite de la plateforme)...")
-            sleep(cooldown)
-
-        except Exception as e:
-            print(f"[-] Une erreur est survenue. Nouvelle tentative dans 5 secondes...")
-            driver.refresh()
-            sleep(5)
-
-def main():
-    global start_time
-    clear_console()
-    set_terminal_title("TikTok Bot")
-
-    print(pyfiglet.figlet_format("TikTok Bot", font="slant"))
-    print("=" * 50)
-    print("1. Vues\n2. Likes\n3. Followers\n4. Partages\n5. Crédits\n")
+@bot.tree.command(name="solde", description="Vérifie votre solde actuel sur Zefame")
+async def solde(interaction: discord.Interaction):
+    payload = {'key': ZEFAME_API_KEY, 'action': 'balance'}
+    await interaction.response.defer(ephemeral=True)
 
     try:
-        choice = int(input("Choix (1-5) : "))
-        if not 1 <= choice <= 5:
-            raise ValueError
-    except ValueError:
-        print("Erreur : Entrez un nombre valide entre 1 et 5.")
-        return
+        response = requests.post(ZEFAME_URL, data=payload, timeout=10).json()
+        if 'balance' in response:
+            await interaction.followup.send(f"💰 **Solde Zefame** : {response['balance']} {response.get('currency', 'USD')}")
+        else:
+            await interaction.followup.send("❌ Erreur : Impossible de récupérer le solde. Vérifiez votre clé API.")
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Erreur technique : {e}")
 
-    if choice == 5:
-        print("\nProjet original par @kangoka — Amélioré par la communauté.")
-        return
+@bot.tree.command(name="gratuits", description="Affiche la liste des services gratuits (Rate = 0)")
+async def gratuits(interaction: discord.Interaction):
+    payload = {'key': ZEFAME_API_KEY, 'action': 'services'}
+    await interaction.response.defer()
 
-    vid_url = input("URL de la vidéo TikTok : ").strip()
-    start_time = current_time()
+    try:
+        response = requests.post(ZEFAME_URL, data=payload, timeout=15).json()
+        free_services = []
 
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--mute-audio")
-    chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        if isinstance(response, list):
+            for service in response:
+                try:
+                    rate = float(service.get('rate', 1))
+                    name = service.get('name', '').lower()
+                    if rate == 0.0 or 'free' in name:
+                        free_services.append(
+                            f"• **ID {service['service']}** : {service['name']} (Min: {service['min']} / Max: {service['max']})"
+                        )
+                except (ValueError, TypeError):
+                    continue
 
-    driver = webdriver.Chrome(options=chrome_options)
-    driver.set_window_size(1024, 650)
-    driver.get("https://zefoy.com/")
+        if free_services:
+            # On limite l'affichage aux 10 premiers pour éviter de saturer le message Discord
+            message = "🎁 **Services Gratuits / Free détectés :**\n" + "\n".join(free_services[:10])
+            await interaction.followup.send(message)
+        else:
+            await interaction.followup.send("ℹ️ Aucun service gratuit trouvé via l'API pour le moment.")
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Erreur lors de la récupération des services : {e}")
 
-    # Configuration par mode : (Service XPATH, Input XPATH, Search XPATH, Send XPATH, Cooldown(s), Métrique, Incrément)
-    config = {
-        1: ("/html/body/div[4]/div[1]/div[3]/div/div[4]/div/button", "//*[@id='sid4']/div/form/div/input", "//*[@id='sid4']/div/form/div/div/button", "//*[@id='c2VuZC9mb2xsb3dlcnNfdGlrdG9V']/div[1]/div/form/button", 300, "views", 1000),
-        2: ("/html/body/div[4]/div[1]/div[3]/div/div[2]/div/button", "//*[@id='sid2']/div/form/div/input", "//*[@id='sid2']/div/form/div/div/button", "//*[@id='c2VuZE9nb2xsb3dlcnNfdGlrdG9r']/div[1]/div/form/button", 1800, "hearts", 10),
-        3: ("/html/body/div[4]/div[1]/div[3]/div/div[1]/div/button", "//*[@id='sid']/div/form/div/input", "//*[@id='sid']/div/form/div/div/button", "//*[@id='c2VuZF9mb2xsb3dlcnNfdGlrdG9r']/div[1]/div/form/button", 1800, "followers", 10),
-        4: ("/html/body/div[4]/div[1]/div[3]/div/div[5]/div/button", "//*[@id='sid7']/div/form/div/input", "//*[@id='sid7']/div/form/div/div/button", "//*[@id='c2VuZC9mb2xsb3dlcnNfdGlrdG9s']/div[1]/div/form/button", 300, "shares", 100)
+@bot.tree.command(name="commander", description="Passe une commande (payante ou gratuite via ID de service)")
+@app_commands.describe(service_id="ID du service", lien="Lien cible (ex: URL de la vidéo)", quantite="Quantité")
+async def commander(interaction: discord.Interaction, service_id: int, lien: str, quantite: int):
+    payload = {
+        'key': ZEFAME_API_KEY,
+        'action': 'add',
+        'service': service_id,
+        'link': lien,
+        'quantity': quantite
     }
+    await interaction.response.defer()
 
-    service_btn, input_x, search_x, send_x, cooldown, key, inc = config[choice]
+    try:
+        response = requests.post(ZEFAME_URL, data=payload, timeout=10).json()
+        
+        if 'order' in response:
+            await interaction.followup.send(f"✅ Commande validée avec succès ! ID de commande : **{response['order']}**")
+        elif 'error' in response:
+            error_msg = response['error']
+            if "not enough balance" in error_msg.lower():
+                await interaction.followup.send("❌ **Solde insuffisant**. Utilisez la commande `/gratuits` pour trouver des options sans frais.")
+            else:
+                await interaction.followup.send(f"❌ Échec de la commande : {error_msg}")
+        else:
+            await interaction.followup.send("⚠️ Réponse inattendue de l'API Zefame.")
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Erreur de communication avec l'API : {e}")
 
-    # Lancement du thread de mise à jour du titre
-    t_title = threading.Thread(target=update_title_thread, args=(key.capitalize(), key), daemon=True)
-    t_title.start()
+# ==========================================
+# COMMANDE HIKERAPI
+# ==========================================
 
-    # Lancement de la boucle principale
-    run_automation_loop(driver, vid_url, service_btn, input_x, search_x, send_x, cooldown, key, inc)
+@bot.tree.command(name="hiker_user", description="Récupère les informations d'un utilisateur via son ID HikerAPI")
+@app_commands.describe(user_id="Identifiant numérique de l'utilisateur")
+async def hiker_user(interaction: discord.Interaction, user_id: str):
+    headers = {
+        'accept': 'application/json',
+        'x-access-key': HIKER_API_KEY
+    }
+    params = {'id': user_id}
+    await interaction.response.defer()
 
-if __name__ == '__main__':
-    main()
+    try:
+        response = requests.get(f"{HIKER_URL}/user/by/id", headers=headers, params=params, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            username = data.get('username', 'Inconnu')
+            full_name = data.get('full_name', 'Non renseigné')
+            await interaction.followup.send(f"👤 **Utilisateur HikerAPI trouvé** :\n- Pseudo : `{username}`\n- Nom complet : `{full_name}`")
+        else:
+            await interaction.followup.send(f"❌ Erreur HikerAPI (Code HTTP: {response.status_code})")
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Erreur de connexion à HikerAPI : {e}")
+
+if __name__ == "__main__":
+    if not DISCORD_TOKEN:
+        print("[ERREUR CRITIQUE] La variable d'environnement 'DISCORD_TOKEN' est manquante.")
+    else:
+        bot.run(DISCORD_TOKEN)
